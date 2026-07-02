@@ -1,6 +1,6 @@
 # SPEC — Fable 5 Research Fleet: Open-Question Resolution Run
 
-*Rev. 3 (2026-07-02) — Rev. 2 revised the draft after an adversarial review pass; Rev. 3 folds in the project handoff so the spec is self-contained. See commit messages for change logs.*
+*Rev. 4 (2026-07-02) — Rev. 2: adversarial review pass. Rev. 3: folded in the project handoff (self-contained). Rev. 4: fixes the six high-severity defects from the recursive critique run (see CRITIQUE.md). See commit messages for change logs.*
 
 **Feed this file to Claude Code.** You (the main Claude Code session) are the **orchestrator**. You will scaffold the repo, deploy a fleet of parallel `claude-fable-5` researcher subagents, enforce per-agent fetch-volume caps, and assemble a single `findings.md` in which every claim cites an exact primary-source URL backed by a raw snapshot — and every unresolved question is explicitly marked as such.
 
@@ -32,9 +32,11 @@
 - [ ] The six standing `[OPEN]` items each appear in a delta table mapping old status → new status, per the §3 mapping table.
 - [ ] `NOT-RESEARCHABLE` questions state *exactly what input would resolve them* (firm data, design decision, etc.) — with **zero speculation** offered as resolution.
 - [ ] `matrix/portfolio_venue_matrix.csv` is populated, with gaps marked `unknown` + reason, never guessed.
-- [ ] Telemetry shows no agent's **self-reported** cumulative read estimate exceeded 32,000 tokens. Splits were used instead. (Estimates are self-logged proxies — see §5 — so this is attestation-grade, and `findings.md` says so.)
-- [ ] Dead-end accounting is **auditable**: each researcher's reported `#dead_ends` matches its telemetry events, and any agent reporting zero dead ends across >5 fetches was spot-checked by the orchestrator (note the check in `findings.md`). Fabricating a dead end to satisfy tooling is itself a protocol violation — an honest zero beats an invented entry.
+- [ ] Telemetry shows no agent's **self-reported** cumulative read estimate exceeded 32,000 tokens — **or** every breach is documented in the `findings.md` method note (agent, question, overrun amount, cause, and the remediation taken: split executed, re-run, or none-possible). (Estimates are self-logged proxies — see §5 — so this is attestation-grade, and `findings.md` says so.)
+- [ ] Dead-end accounting is **auditable**: each researcher's reported `#dead_ends` matches its telemetry events, and any agent reporting zero dead ends across >5 fetches was spot-checked by the orchestrator (note the check in `findings.md`) — discrepancies that can't be repaired are documented, not hidden. Fabricating a dead end to satisfy tooling is itself a protocol violation — an honest zero beats an invented entry.
 - [ ] `streamlit run dashboard/app.py` works.
+
+**Breach procedure (applies to any box asserting a historical fact):** history can't be re-run, so these boxes are satisfiable two ways — remediate what is fixable (split, re-spawn, re-audit), and document what is not, in the method note, with cause and impact. A documented breach does not block completion; an undocumented or silently reinterpreted box does.
 
 ---
 
@@ -149,8 +151,12 @@ questions:
       page didn't exist — record 'unknown', never 'no'. And the matrix itself
       is portfolio-derived, so it carries survivorship bias by construction:
       it is descriptive input for lens design and backtesting, never evidence
-      for a gate. Output rows for matrix/portfolio_venue_matrix.csv (schema
-      in §7).
+      for a gate. OUTPUT: write your batch's rows (schema in §7) to your own
+      file matrix/<your-lowercase-qid>.csv — e.g. matrix/q4a.csv — one writer
+      per file, no shared-file races; duplicate the same rows into your
+      evidence JSON's data.matrix_rows so the synthesizer can verify them.
+      The orchestrator assembles the final matrix from the per-batch CSVs
+      (§12).
     note: Large. Orchestrator pre-splits into batches of <=5 companies from census.csv.
 
   - id: Q5
@@ -297,7 +303,7 @@ orchestrator (you, main session)
  └─ assembly (you): sections/*.md -> findings.md ; DoD check
 ```
 
-**Context hygiene for the orchestrator:** subagent replies to you are **≤10 lines**. All detail lives in files. You read `sections/*.md`, telemetry aggregates, and `matrix/census.csv` (the one structured file you need to cut Q4 batches) — never raw snapshots, never full evidence JSON.
+**Context hygiene for the orchestrator:** subagent replies to you are **≤10 lines**. All detail lives in files. You read `sections/*.md`, telemetry aggregates, and `matrix/*.csv` (the census, to cut Q4 batches; the per-batch matrix CSVs, to assemble the final matrix in §12) — never raw snapshots, never full evidence JSON.
 
 ---
 
@@ -312,7 +318,7 @@ orchestrator (you, main session)
 - **Split protocol (orchestrator-executed — researchers cannot spawn agents):**
   1. Researcher nearing budget with the question unfinished returns `status: partial` + `split_proposal`: 2–4 *disjoint* child briefs.
   2. You spawn children as `Q4a`, `Q4b`, … each with a fresh budget and only the narrowed brief (never the parent's raw reads).
-  3. Parent evidence is preserved; the synthesizer for the base qid reads all `evidence/q4*.json`.
+  3. Parent evidence is preserved; the synthesizer for the base qid reads all its `evidence/` files. Splitting researchers concentrates load on that one synthesizer, so for heavily split questions the orchestrator runs one synthesizer per child evidence file plus a final merge synthesizer that reads only the child `sections/` files — the synthesizer-side mirror of the researcher split protocol.
   4. Splitting is always preferred over budget overrun. Pre-split anything obviously large (Q4 → company batches of ≤5) before first spawn.
 
 ---
@@ -351,7 +357,7 @@ printf '%s\n' "$line" >> telemetry/agents.jsonl
 
 The scaffold ships `.claude/settings.json` (§8) pre-allowing `scripts/log.sh`, `scripts/snap.sh`, and the handful of read-only commands researchers need — without it, four parallel researchers logging after every fetch would drown the session in permission prompts.
 
-**Researcher logging rule: after EVERY WebFetch/WebSearch, before doing anything else, log a `read` event with the estimate and new cumulative.** No exceptions — an unlogged read is a budget leak.
+**Researcher logging rule: after EVERY WebFetch/WebSearch — and after EVERY Read of a file into context — before doing anything else, log a `read` event with the estimate and new cumulative.** File reads count against the same budget (§5) and are often the heaviest reads in the run (snapshot `.txt` files during quote re-derivation); a logging rule that only fires on web fetches would make the dashboard and the DoD audit systematically undercount them. For file reads, put the file path in the `url` field; for WebSearch, put the query string. No exceptions — an unlogged read is a budget leak.
 
 ---
 
@@ -397,6 +403,8 @@ Non-empty result with capture timestamp **strictly earlier** than the investment
 **`matrix/portfolio_venue_matrix.csv` columns:**
 `company, investment_date, investment_date_source_url, venue, present(y/n/unknown), venue_label_or_category, earliest_evidence_date, evidence_url, wayback_url, predates_investment(y/n/unknown), notes`
 
+**Matrix write path (who produces what):** each Q4 batch researcher writes its rows to its own `matrix/<lowercase-qid>.csv` (e.g. `matrix/q4a.csv`) with the header above, and duplicates the rows into its evidence JSON `data.matrix_rows` (the verification copy — the Q4 synthesizer checks the claims behind them and flags any row-count mismatch between the two in its section). The orchestrator — the only reader of `matrix/*.csv` — concatenates the per-batch files (one header) into `matrix/portfolio_venue_matrix.csv` at assembly (§12). No agent ever writes the final matrix file directly.
+
 **`matrix/census.csv` columns (written by Q1, read by the orchestrator):**
 `company, announce_date, source_url`
 
@@ -425,10 +433,25 @@ Flat at the **repo root** — subagent discovery walks up from cwd, so `.claude/
 ```bash
 #!/usr/bin/env bash
 # usage: scripts/snap.sh <url> <qid> <slug> <agent_id>
-set -euo pipefail
+# Deliberately NOT set -e: a curl failure must never abort silently before
+# telemetry is written — that would be the exact "silent abandonment"
+# researcher rule 6 forbids. Every path through this script logs an event.
+set -u
 url=$1; qid=$2; slug=$3; agent=$4
 dir="snapshots/$qid"; mkdir -p "$dir"
-code=$(curl -sL --max-time 60 -o "$dir/$slug.html" -w '%{http_code}' "$url")
+code=$(curl -sL --max-time 60 -o "$dir/$slug.html" -w '%{http_code}' "$url") || code="000"
+ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+case "$code" in
+  2*|3*) : ;;  # success — fall through
+  *)
+    rm -f "$dir/$slug.html"
+    scripts/log.sh <<EOF
+{"ts":"$ts","agent_id":"$agent","role":"researcher","question_id":"$qid","event":"snapshot","url":"$url","http_status":"$code","bytes":0,"failed":true}
+EOF
+    echo "SNAPSHOT FAILED: $url (http $code) — no artifacts written; continue down the fallback ladder, and log a dead_end if you abandon this URL"
+    exit 0
+    ;;
+esac
 python3 - "$dir/$slug.html" > "$dir/$slug.txt" <<'PY'
 import html, re, sys
 t = open(sys.argv[1], encoding="utf-8", errors="replace").read()
@@ -436,12 +459,11 @@ t = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", t, flags=re.S | re.I)
 t = re.sub(r"<[^>]+>", " ", t)
 print(html.unescape(re.sub(r"\s+", " ", t)).strip())
 PY
-ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 bytes=$(wc -c < "$dir/$slug.html" | tr -d ' ')
-printf '{"url":"%s","accessed":"%s","agent_id":"%s","http_status":%s,"bytes":%s,"fidelity":"raw"}\n' \
+printf '{"url":"%s","accessed":"%s","agent_id":"%s","http_status":"%s","bytes":%s,"fidelity":"raw"}\n' \
   "$url" "$ts" "$agent" "$code" "$bytes" > "$dir/$slug.meta.json"
 scripts/log.sh <<EOF
-{"ts":"$ts","agent_id":"$agent","role":"researcher","question_id":"$qid","event":"snapshot","url":"$url","http_status":$code,"bytes":$bytes}
+{"ts":"$ts","agent_id":"$agent","role":"researcher","question_id":"$qid","event":"snapshot","url":"$url","http_status":"$code","bytes":$bytes}
 EOF
 echo "snapshot: $dir/$slug.html ($bytes bytes, http $code)"
 ```
@@ -489,11 +511,15 @@ the target explicitly). Use WebFetch to read and decide. Evidence comes only
 from raw snapshots (scripts/snap.sh -> curl).
 
 HARD RULES
-1. TELEMETRY: after EVERY WebFetch/WebSearch, immediately log a `read` event
-   via scripts/log.sh (heredoc — JSON on stdin, never as a quoted argument).
-   est_tokens = ceil(chars/4), an honest eyeball estimate of the tool result
-   you saw, plus your running cum_tokens. An unlogged read is a protocol
-   violation.
+1. TELEMETRY: after EVERY WebFetch/WebSearch AND after every Read of a file
+   into your context, immediately log a `read` event via scripts/log.sh
+   (heredoc — JSON on stdin, never as a quoted argument). est_tokens =
+   ceil(chars/4), an honest eyeball estimate of the tool result you saw,
+   plus your running cum_tokens. File reads count against the same budget:
+   put the file path in the `url` field (the query string, for WebSearch).
+   grep results that return only a match/exit-code are exempt; anything
+   that puts body text in your context is not. An unlogged read is a
+   protocol violation.
 2. BUDGET: warn yourself in your notes at cum 20k; STOP all fetching at 24k;
    never exceed 32k total read. If unfinished at the stop line, return
    status "partial" with a split_proposal of 2-4 disjoint child briefs.
@@ -530,12 +556,29 @@ HARD RULES
    15k read beats a noisy 30k.
 
 OUTPUT
-Write evidence/<qid>.json matching the contract in the spec's §11 (uncapped —
-file output does not count against your read budget), log a `done` event
-(status, cum_tokens, model_self_reported — say what you believe you are, it
-will be labeled self-reported), then reply to the orchestrator with <=10
-lines: status, #claims, #dead_ends, cum_tokens, any venue-level blocks hit,
-split_proposal? (yes/no).
+Write evidence/<qid>.json (lowercase qid in all paths) matching this
+skeleton exactly — it is your only contract; you never see the parent spec:
+
+  {"qid":"...", "status":"resolved|partial|unresolved|not_researchable",
+   "summary":"<=120 words",
+   "claims":[{"id":"c1","text":"paraphrased claim","urls":["https://exact.url"],
+     "snapshot":"snapshots/<qid>/<slug>.html",
+     "snapshot_fidelity":"raw|model-mediated",
+     "quote":"<=25-word exact quote","quote_locator":"heading/para hint",
+     "quote_verified":"grep-pass|grep-fail-rederived|unverified",
+     "confidence":"high|med|low","why":"one line"}],
+   "data":{"matrix_rows":[]},
+   "dead_ends":[{"url_or_query":"...","reason":"..."}],
+   "est_tokens_read":0,
+   "split_proposal":[{"child_qid":"...","brief":"...","seed":[]}]}
+
+The file is uncapped — file output does not count against your read budget.
+If your brief includes matrix rows, also write them to
+matrix/<lowercase-qid>.csv per the brief's schema (your own file; never a
+shared one). Log a `done` event (status, cum_tokens, model_self_reported —
+say what you believe you are, it will be labeled self-reported), then reply
+to the orchestrator with <=10 lines: status, #claims, #dead_ends,
+cum_tokens, any venue-level blocks hit, split_proposal? (yes/no).
 ```
 
 ---
@@ -550,7 +593,9 @@ tools: Read, Write
 model: claude-fable-5
 ---
 You are a synthesis agent. Input: one qid. You reason over the FROZEN corpus
-only — evidence/<qid>*.json and exactly the snapshot files they reference.
+only — evidence/<qid>*.json, exactly the snapshot files they reference, and
+(for matrix questions) matrix/<qid>.csv, whose rows you cross-check against
+data.matrix_rows, flagging any mismatch in your section.
 You have no web tools and no Bash — by design, so "offline" is structural,
 not honor-system. Do not ask for more tools.
 
@@ -565,8 +610,14 @@ PROCESS
    - Snapshot meta says "fidelity":"model-mediated" -> confidence is low by
      rule; flag it and route to the uncertainty register regardless of
      entailment (the snapshot itself is an AI digest, not the source).
-3. Budget: same 32k read cap. If snapshots are too large, verify on sampled
-   excerpts and say so explicitly in the section.
+3. Budget: same 32k read cap. If your mandatory read set cannot fit even
+   with sampled excerpts: verify a prioritized subset first (claims feeding
+   matrix rows, then high-confidence claims, then the rest), mark whatever
+   you could not check [UNVERIFIED - capacity] (distinct from failed
+   verification), state your coverage (n of m claims verified) in the
+   section, and tell the orchestrator in your reply — it can split the
+   remainder across additional synthesizers (one per evidence file) and a
+   merge pass. Never silently skip; never blow the cap.
 4. Telemetry: you have no Bash. Accumulate your events (read/done, same §6
    schema) and Write them ONCE as telemetry/synth-<qid>.jsonl before
    finishing. One file, one writer, complete.
@@ -614,13 +665,13 @@ PROCESS
 }
 ```
 
-This file is uncapped (§5) — completeness beats brevity here; the synthesizer, not the orchestrator, reads it.
+This file is uncapped (§5) — completeness beats brevity here; the synthesizer, not the orchestrator, reads it. For matrix questions (Q4 batches), `data.matrix_rows` duplicates the rows written to `matrix/<lowercase-qid>.csv` — it is the verification copy per §7.
 
 ---
 
 ## 12. Assembly (orchestrator) — `findings.md`
 
-Read only `sections/*.md`, telemetry aggregates, and `matrix/census.csv`. Structure:
+Read only `sections/*.md`, telemetry aggregates, and `matrix/*.csv`. First assemble the matrix: concatenate the per-batch `matrix/q4*.csv` files (keeping a single header row) into `matrix/portfolio_venue_matrix.csv` — this is the step that satisfies DoD-6, and it is yours, not an agent's. Then write `findings.md`:
 
 ```markdown
 # Findings — GE Sourcing Open Questions
@@ -722,7 +773,7 @@ board()
 1. **Phase 0 (first session, cwd = repo root):** read this spec fully → build full scaffold (§8) exactly → verify files (`bash -n` the scripts, `python3 -m py_compile dashboard/app.py`) → tell the user to **restart Claude Code** (same cwd) and run the execute kickoff. Stop.
 2. **Phase 1 (after restart, cwd = repo root):** confirm `researcher` and `synthesizer` are registered (halt + tell user if not). Log orchestrator `spawn`.
 3. **Wave 1 (≤4 parallel):** Q1, Q2, Q6, Q7.
-4. Between every wave: read telemetry; confirm no agent's self-reported reads >32k; audit dead-end counts vs replies (spot-check any zero-dead-end agent with >5 fetches); note any venue-level `bot-blocked` dead ends and mark those venues **fail-fast** in subsequent briefs (later batches go straight to Wayback); execute any `split_proposal`s; spawn a synthesizer for each qid whose evidence has fully landed (synthesizers can run alongside later research waves).
+4. Between every wave: read telemetry; confirm no agent's self-reported reads >32k; audit dead-end counts vs replies (spot-check any zero-dead-end agent with >5 fetches); note any venue-level `bot-blocked` dead ends and mark those venues **fail-fast** in subsequent briefs (later batches go straight to Wayback); execute any `split_proposal`s (and the synthesizer-side split of §5.3 where a synthesizer reported capacity limits); spawn a synthesizer for each qid whose evidence has fully landed (synthesizers can run alongside later research waves).
 5. **Wave 2:** Q3, Q5 + first Q4 batches — **gated on `matrix/census.csv` existing** (Q1's deliverable; if the census is partial, batch only the companies that landed and schedule the rest for Wave 3). Cut batches of ≤5 companies from the CSV; put each batch's companies + investment dates directly in the child brief.
 6. **Wave 3:** remaining Q4 batches, Q8, Q10.
 7. **Wave 4:** Q9 + any split children/stragglers.
