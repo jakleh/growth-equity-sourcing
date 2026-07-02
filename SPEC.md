@@ -1,6 +1,6 @@
 # SPEC — Fable 5 Research Fleet: Open-Question Resolution Run
 
-*Rev. 5 (2026-07-02) — Rev. 2: adversarial review pass. Rev. 3: folded in the project handoff (self-contained). Rev. 4: fixed the six high-severity defects from the recursive critique run (see CRITIQUE.md). Rev. 5: fixed all sixteen medium-severity findings. See commit messages for change logs.*
+*Rev. 6 (2026-07-02) — Rev. 2: adversarial review pass. Rev. 3: folded in the project handoff (self-contained). Rev. 4: fixed the six high-severity defects from the recursive critique run (see CRITIQUE.md). Rev. 5: fixed all sixteen medium-severity findings. Rev. 6: swept the remaining low-severity findings. See commit messages for change logs.*
 
 **Feed this file to Claude Code.** You (the main Claude Code session) are the **orchestrator**. You will scaffold the repo, deploy a fleet of parallel `claude-fable-5` researcher subagents, enforce per-agent fetch-volume caps, and assemble a single `findings.md` in which every claim cites an exact primary-source URL backed by a raw snapshot — and every unresolved question is explicitly marked as such.
 
@@ -34,7 +34,7 @@
 - [ ] `matrix/portfolio_venue_matrix.csv` is populated — **one row per (census company × venue checked)**, every column carrying a value or `unknown` (+ reason in notes), never guessed. Headers-plus-a-few-rows does not pass this box.
 - [ ] Telemetry shows no agent's **self-reported** cumulative read estimate exceeded 32,000 tokens — **or** every breach is documented in the `findings.md` method note (agent, question, overrun amount, cause, and the remediation taken: split executed, re-run, or none-possible). (Estimates are self-logged proxies — see §5 — so this is attestation-grade, and `findings.md` says so.)
 - [ ] Dead-end accounting is **auditable**: each researcher's reported `#dead_ends` matches its telemetry events, and any agent reporting zero dead ends across >5 fetches was spot-checked by the orchestrator (note the check in `findings.md`) — discrepancies that can't be repaired are documented, not hidden. Fabricating a dead end to satisfy tooling is itself a protocol violation — an honest zero beats an invented entry.
-- [ ] `streamlit run dashboard/app.py` works.
+- [ ] `streamlit run dashboard/app.py` launches and renders the board: with the run's telemetry present, it shows per-agent read totals (nonzero for at least one researcher) and the dead-end table. "Launches without crashing" alone does not pass.
 
 **Breach procedure (applies to any box asserting a historical fact):** history can't be re-run, so these boxes are satisfiable two ways — remediate what is fixable (split, re-spawn, re-audit), and document what is not, in the method note, with cause and impact. A documented breach does not block completion; an undocumented or silently reinterpreted box does.
 
@@ -78,8 +78,8 @@
 | Flat vs. split telemetry tables | Q9 |
 
 ```yaml
-# class A = web-researchable | class B = requires firm input or is a design decision
-# priority: P0 highest
+# class A = web-researchable | A-input = research provides decision inputs, resolution stays a design decision | B = requires firm input or is a design decision
+# priority: P0 highest; P0-flag = not researchable, but findings.md must flag it prominently
 questions:
   - id: Q1
     class: A
@@ -90,9 +90,10 @@ questions:
       names and investment announcement dates. Capture the firm's stated thesis
       parameters verbatim-adjacent: founder-ownership language (verify whether a
       specific % threshold is actually stated anywhere — do NOT assume one),
-      capital-efficiency language, sector focus. Output structured JSON list
-      AND write matrix/census.csv (company, announce_date, source_url) — the
-      orchestrator cuts Q4 batches from that CSV, so it must be machine-clean.
+      capital-efficiency language, sector focus. Output the full census as
+      data.census in your evidence JSON AND write matrix/census.csv
+      (company, announce_date, source_url) — the orchestrator cuts Q4
+      batches from that CSV, so it must be machine-clean.
     seed: [volitioncapital.com/portfolio, volitioncapital.com/news, press releases per company]
     note: Q4 depends on this. Deliver even a partial census early.
 
@@ -238,7 +239,9 @@ questions:
       lean toward split. Brief scan of event-logging schema practice (wide
       events vs normalized, OpenTelemetry event modeling). Inputs only; the
       [OPEN] stays open — report whether practice supports or undercuts the
-      "leaning split" prior, without resolving it.
+      "leaning split" prior, without resolving it. Scope note: this question
+      is about the sourcing project's instrumentation schema, NOT about this
+      research run's own telemetry files — do not conflate the two.
 
   - id: Q10
     class: A
@@ -389,7 +392,7 @@ The scaffold ships `.claude/settings.json` (§8) pre-allowing `scripts/log.sh`, 
 
 and logs a `snapshot` event.
 
-**Quote verification (researcher-side, before recording a claim):** `grep -qiF "<quote>" snapshots/<qid>/<slug>.txt` must succeed. If it doesn't, re-derive the quote *from the .txt* — never from the WebFetch digest. Record the result in the claim's `quote_verified` field (§11).
+**Quote verification (researcher-side, before recording a claim):** `grep -qiF "<quote>" snapshots/<qid>/<slug>.txt` must succeed. Collapse whitespace runs in the quote to single spaces first — the `.txt` is normalized exactly that way (§8), so a quote carrying line breaks or double spaces grep-fails spuriously. If it still fails, re-derive the quote *from the .txt* — never from the WebFetch digest. Record the result in the claim's `quote_verified` field (§11).
 
 **Model-mediated fallback (ladder rung (c), §15).** If both the live raw fetch and the Wayback rung fail, you may snapshot the WebFetch digest: Write it to `snapshots/<qid>/<slug>.txt` (there is no raw body, so no `.html`) plus `snapshots/<qid>/<slug>.meta.json` with `"fidelity":"model-mediated"`. Claims citing it point their `snapshot` field at that `.txt` — giving the synthesizer a file to verify against — and are capped at `confidence: low`, flagged in the section, and routed to the uncertainty register. Log the failed raw fetch as a `dead_end`.
 
@@ -449,6 +452,8 @@ Flat at the **repo root** — subagent discovery walks up from cwd, so `.claude/
 # Deliberately NOT set -e: a curl failure must never abort silently before
 # telemetry is written — that would be the exact "silent abandonment"
 # researcher rule 6 forbids. Every path through this script logs an event.
+# All JSON is built with json.dumps — printf cannot escape the quotes or
+# backslashes that occasionally appear in real URLs.
 set -u
 url=$1; qid=$2; slug=$3; agent=$4
 dir="snapshots/$qid"; mkdir -p "$dir"
@@ -458,9 +463,12 @@ case "$code" in
   2*|3*) : ;;  # success — fall through
   *)
     rm -f "$dir/$slug.html"
-    scripts/log.sh <<EOF
-{"ts":"$ts","agent_id":"$agent","role":"researcher","question_id":"$qid","event":"snapshot","url":"$url","http_status":"$code","bytes":0,"failed":true}
-EOF
+    python3 - "$ts" "$agent" "$qid" "$url" "$code" <<'PY' | scripts/log.sh
+import json, sys
+t, a, q, u, c = sys.argv[1:6]
+print(json.dumps({"ts": t, "agent_id": a, "role": "researcher", "question_id": q,
+                  "event": "snapshot", "url": u, "http_status": c, "bytes": 0, "failed": True}))
+PY
     echo "SNAPSHOT FAILED: $url (http $code) — no artifacts written; continue down the fallback ladder, and log a dead_end if you abandon this URL"
     exit 0
     ;;
@@ -473,11 +481,18 @@ t = re.sub(r"<[^>]+>", " ", t)
 print(html.unescape(re.sub(r"\s+", " ", t)).strip())
 PY
 bytes=$(wc -c < "$dir/$slug.html" | tr -d ' ')
-printf '{"url":"%s","accessed":"%s","agent_id":"%s","http_status":"%s","bytes":%s,"fidelity":"raw"}\n' \
-  "$url" "$ts" "$agent" "$code" "$bytes" > "$dir/$slug.meta.json"
-scripts/log.sh <<EOF
-{"ts":"$ts","agent_id":"$agent","role":"researcher","question_id":"$qid","event":"snapshot","url":"$url","http_status":"$code","bytes":$bytes}
-EOF
+python3 - "$url" "$ts" "$agent" "$code" "$bytes" <<'PY' > "$dir/$slug.meta.json"
+import json, sys
+u, t, a, c, b = sys.argv[1:6]
+print(json.dumps({"url": u, "accessed": t, "agent_id": a, "http_status": c,
+                  "bytes": int(b), "fidelity": "raw"}))
+PY
+python3 - "$ts" "$agent" "$qid" "$url" "$code" "$bytes" <<'PY' | scripts/log.sh
+import json, sys
+t, a, q, u, c, b = sys.argv[1:7]
+print(json.dumps({"ts": t, "agent_id": a, "role": "researcher", "question_id": q,
+                  "event": "snapshot", "url": u, "http_status": c, "bytes": int(b)}))
+PY
 echo "snapshot: $dir/$slug.html ($bytes bytes, http $code)"
 ```
 
@@ -539,14 +554,18 @@ HARD RULES
 3. EVIDENCE: cite only URLs you actually fetched this session. Never
    reconstruct a URL from memory. Before citing, snapshot raw via
    scripts/snap.sh <url> <qid> <slug> <agent_id>, then verify your quote:
-   grep -qiF "<quote>" snapshots/<qid>/<slug>.txt must succeed. If it fails,
-   re-derive the quote FROM THE .txt, never from the WebFetch digest. Record
-   quote_verified accordingly.
+   grep -qiF "<quote>" snapshots/<qid>/<slug>.txt must succeed. Collapse
+   whitespace runs in your quote to single spaces first — the .txt is
+   normalized that way. If it still fails, re-derive the quote FROM THE
+   .txt, never from the WebFetch digest. Record quote_verified accordingly.
 4. FALLBACK LADDER for blocked pages (G2/Crunchbase/Inc.com etc. bot-block),
    strictly in this order: (a) live raw fetch via snap.sh; (b) Wayback
-   capture of the same URL (fetch
-   https://web.archive.org/web/<timestamp>/<url>, snapshot THAT — it is a
-   citable primary); (c) if the content still matters at low confidence,
+   capture of the same URL: get a capture timestamp from the CDX API —
+   curl 'http://web.archive.org/cdx/search/cdx?url=<url>&limit=-1' returns
+   the newest capture (add &to=<YYYYMMDD> and limit=1 for date-sensitive
+   needs) — then fetch https://web.archive.org/web/<timestamp>/<url> and
+   snapshot THAT; it is a citable primary; (c) if the content still
+   matters at low confidence,
    the WebFetch digest, written to snapshots/<qid>/<slug>.txt + meta.json
    with "fidelity":"model-mediated" — claims citing it are capped at
    confidence low; (d) record `unknown`. Whenever you abandon the URL — at
@@ -714,8 +733,10 @@ any agent that reported zero dead ends across >5 fetches (§1 DoD).
 ## Method note
 Read-token accounting is an estimate (chars/4) self-logged per fetch; true
 per-subagent token usage is not exposed in-session, and enforcement was
-post-hoc between waves. Cited snapshots are raw curl captures except where
-labeled model-mediated (an AI digest — low confidence by rule). Model
+post-hoc between waves. Dead-end auditing catches inconsistency between
+reported counts and logged events; a dead end that was never logged at all
+is undetectable in principle. Cited snapshots are raw curl captures except
+where labeled model-mediated (an AI digest — low confidence by rule). Model
 identity per agent is as-configured at spawn; subagent self-reports are
 attestations. Synthesis ran offline (no web tools, no Bash) over the frozen
 corpus only.
@@ -793,9 +814,9 @@ board()
 ## 14. Runbook (orchestrator)
 
 1. **Phase 0 (first session, cwd = repo root):** read this spec fully → build full scaffold (§8) exactly → verify files (`bash -n` the scripts, `python3 -m py_compile dashboard/app.py`) → tell the user to **restart Claude Code** (same cwd) and run the execute kickoff. Stop.
-2. **Phase 1 (after restart, cwd = repo root):** confirm `researcher` and `synthesizer` are registered (halt + tell user if not). Log orchestrator `spawn`.
+2. **Phase 1 (after restart, cwd = repo root):** confirm `researcher` and `synthesizer` are registered — the check is a trivial spawn: invoke each once with "reply OK and stop; do not log telemetry or write files" and confirm the reply arrives (halt + tell the user if either fails to spawn). Log orchestrator `spawn`.
 3. **Wave 1 (≤4 parallel):** Q1, Q2, Q6, Q7.
-4. Between every wave: read telemetry; confirm no agent's summed `read` est_tokens >32k (the §5 enforcement metric — breaches follow the §1 breach procedure); audit dead-end counts vs replies (spot-check any zero-dead-end agent with >5 fetches); note any venue-level `bot-blocked` dead ends and mark those venues **fail-fast** in subsequent briefs (later batches skip the live rung); re-diff `matrix/census.csv` against already-dispatched Q4 batches — companies added since form catch-up batches in the next wave, so late census rows never silently miss the matrix; execute any `split_proposal`s (and the synthesizer-side split of §5.3 where a synthesizer reported capacity limits); spawn a synthesizer for each qid whose evidence has **fully landed** — defined as: every researcher spawned for that qid (parent, children, batches) has logged `done`, and no split proposal or catch-up batch for it remains undispatched (synthesizers can run alongside later research waves).
+4. Between every wave: read telemetry; confirm no agent's summed `read` est_tokens >32k (the §5 enforcement metric — breaches follow the §1 breach procedure); audit dead-end counts vs replies (spot-check any zero-dead-end agent with >5 fetches); note any venue-level `bot-blocked` dead ends and mark those venues **fail-fast** in subsequent briefs (later batches skip the live rung); re-diff `matrix/census.csv` against already-dispatched Q4 batches — companies added since form catch-up batches in the next wave, so late census rows never silently miss the matrix; confirm `telemetry/synth-<qid>.jsonl` exists for every synthesizer spawned in an earlier wave — a missing file means it died before its one-shot Write; re-spawn it; execute any `split_proposal`s (and the synthesizer-side split of §5.3 where a synthesizer reported capacity limits); spawn a synthesizer for each qid whose evidence has **fully landed** — defined as: every researcher spawned for that qid (parent, children, batches) has logged `done`, and no split proposal or catch-up batch for it remains undispatched (synthesizers can run alongside later research waves).
 5. **Wave 2:** Q3, Q5 + first Q4 batches — **gated on `matrix/census.csv` existing** (Q1's deliverable; if the census is partial, batch only the companies that landed and schedule the rest for Wave 3). Cut batches of ≤5 companies from the CSV; put each batch's companies + investment dates directly in the child brief. **If Q1 lands UNRESOLVED** (no census obtainable even after splits), do not stall: write Q4's section as UNRESOLVED / blocked-on-input (required input: the portfolio census), drop the Q4 batches from later waves, and move on.
 6. **Wave 3:** remaining Q4 batches, Q8, Q10.
 7. **Wave 4:** Q9 + any split children/stragglers.
@@ -819,7 +840,7 @@ board()
 ## 16. Kickoff prompts
 
 **Phase 0 (scaffold):**
-> Read SPEC.md (this file) fully — it is self-contained. Execute §8 Phase 0 only: build the full scaffold at the repo root, including both agent files under .claude/agents/, .claude/settings.json, backlog.yaml, scripts, and dashboard. Verify the scripts and dashboard parse. Then stop and tell me to restart the session from the repo root.
+> Read SPEC.md (this file) fully — it is self-contained. Execute Phase 0 only (runbook step 1 of §14 — building the §8 scaffold): build the full scaffold at the repo root, including both agent files under .claude/agents/, .claude/settings.json, backlog.yaml, scripts, and dashboard. Verify the scripts and dashboard parse. Then stop and tell me to restart the session from the repo root.
 
 **Phase 1 (execute):**
 > Read SPEC.md fully — it is self-contained. You are the orchestrator. Execute the §14 runbook from step 2. Do not fetch web content yourself — delegate all research to researcher subagents in parallel waves of ≤4, enforce the §5 caps via telemetry between waves, run synthesizers offline as evidence lands, and finish only when the §1 DoD checklist fully passes.
