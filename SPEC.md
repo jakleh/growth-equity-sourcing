@@ -1,10 +1,10 @@
 # SPEC — Fable 5 Research Fleet: Open-Question Resolution Run
 
-*Rev. 2 (2026-07-02) — revised after an adversarial review pass; see the commit message for the change log.*
+*Rev. 3 (2026-07-02) — Rev. 2 revised the draft after an adversarial review pass; Rev. 3 folds in the project handoff so the spec is self-contained. See commit messages for change logs.*
 
 **Feed this file to Claude Code.** You (the main Claude Code session) are the **orchestrator**. You will scaffold the repo, deploy a fleet of parallel `claude-fable-5` researcher subagents, enforce per-agent fetch-volume caps, and assemble a single `findings.md` in which every claim cites an exact primary-source URL backed by a raw snapshot — and every unresolved question is explicitly marked as such.
 
-**Prerequisite file:** `ge-sourcing-handoff.md` must be in the repo root. **It is not currently in this repo** — obtain it before starting; the run cannot begin without it. Read it once, fully, before anything else. Researchers never receive it — they get distilled question briefs only.
+**Self-contained:** this spec embeds all the project context the run needs (§2) and supersedes `ge-sourcing-handoff.md` for this run — no other file is required. Researchers never receive project background wholesale; they get the distilled question briefs in §3 only, which is why those briefs carry their own context.
 
 **Session placement:** all sessions (Phase 0 and Phase 1) run with the **repo root as cwd**. Claude Code discovers project subagents by walking *up* from the cwd, never down — which is why the scaffold in §8 is flat at the repo root and `.claude/agents/` sits directly under it.
 
@@ -22,14 +22,14 @@
 
 ## 1. Objective & Definition of Done
 
-**Objective.** Resolve as many open questions as possible from the GE sourcing project — the six `[OPEN]` items in the handoff doc plus the questions raised in the follow-on working session (encoded in §3) — producing `findings.md` where every claim is grounded in a snapshotted primary source with its exact URL, and every gap is honestly registered.
+**Objective.** Resolve as many open questions as possible from the GE sourcing project — its six standing `[OPEN]` items (mapped to Q8–Q13; see the mapping table in §3) plus the questions raised in the follow-on working session (Q1–Q7), all encoded in §3 — producing `findings.md` where every claim is grounded in a snapshotted primary source with its exact URL, and every gap is honestly registered.
 
 **Definition of Done — do not stop before all boxes check:**
 
 - [ ] `findings.md` exists; **every factual claim** carries a footnote with exact URL + access timestamp + local snapshot path.
 - [ ] Every cited snapshot is **raw** (`fidelity: raw` in its meta.json) unless explicitly labeled `model-mediated`, in which case the claim's confidence is capped at `low` and it appears in the uncertainty register.
 - [ ] Every backlog question (§3) has a status: `RESOLVED` / `PARTIAL` / `UNRESOLVED` / `NOT-RESEARCHABLE`.
-- [ ] The six original `[OPEN]` items each appear in a delta table mapping old status → new status.
+- [ ] The six standing `[OPEN]` items each appear in a delta table mapping old status → new status, per the §3 mapping table.
 - [ ] `NOT-RESEARCHABLE` questions state *exactly what input would resolve them* (firm data, design decision, etc.) — with **zero speculation** offered as resolution.
 - [ ] `matrix/portfolio_venue_matrix.csv` is populated, with gaps marked `unknown` + reason, never guessed.
 - [ ] Telemetry shows no agent's **self-reported** cumulative read estimate exceeded 32,000 tokens. Splits were used instead. (Estimates are self-logged proxies — see §5 — so this is attestation-grade, and `findings.md` says so.)
@@ -38,19 +38,42 @@
 
 ---
 
-## 2. Inherited principles (non-negotiable, from the handoff doc)
+## 2. Project context & inherited principles (self-contained)
+
+**The project.** An agentic workflow that narrows a large company list to those with the highest expected value of a first meeting, for a real growth-equity firm engagement (Volition Capital). Its governing reframe: **this is a data collection problem** — Phase 1 finds and stores primary sources; reasoning over them happens later, separately. That decoupling is what makes the system tunable, keeps agent hallucinations out of the stored corpus, and turns backtesting into "re-reason over a frozen corpus" instead of an impossible re-crawl. This research run inherits that architecture wholesale — and one more of the project's standing constraints justifies the fleet design itself: *multi-agent gains apply to breadth-first retrieval, not reasoning* — hence parallel researchers, one synthesizer per question.
+
+**Background needed to interpret the backlog (distilled from the project; §3 briefs embed what each researcher needs):**
+
+- **Three-tier source architecture.** Tier 1: known endpoints, binary gates (evaluation, not search — e.g. funding-history checks). Tier 2: known endpoints, qualitative depth (claims and scores, possibly multiple primaries jointly). Tier 3: unknown endpoints, exploratory — the only true search; the agent traverses from the investment philosophy. Promotion path: a Tier 3 endpoint that repeatedly proves signal-bearing (human-verified) is promoted to Tier 2; to Tier 1 only if the judgment distills to a crisp binary. Gates that stop predicting get retired. The funnel is **multiple T's**: cheap breadth gates kill most of the set → survivors get deep exploration → empty depth results feed back to widen N.
+- **Set construction (Module 1).** You cannot query "cash-efficient" — no endpoint returns it, and the trait is adversely selected against visibility (capital efficiency minimizes public footprint; TechCrunch is the photographic negative of the target universe). Therefore: **enumerate a vertical, don't scan the economy** — a bounded set is the only thing whose completeness you can reason about. Ranked channels: (1) Inc. 5000 / Deloitte Fast 500 / regional fast-growth lists; (2) trade-show exhibitor lists and association directories; (3) G2/Capterra category grids (review accumulation ≈ paying customers; the category ≈ the population); (4) job-posting velocity; (5) niche trade press (Tier 3 material only). The locked next step: one vertical B2B SaaS niche → bounded set from one G2 category ∩ one trade-show exhibitor list, flagging Inc. 5000 / Fast 500 appearances → funding-history-vs-scale as the first Tier 1 gate. **Q3 and Q4 exist to test the load-bearing venues of exactly this step.**
+- **The inflection-strain lens (Tier 2 signal, never a gate).** Detect companies at the moment their current org can't take them to the next level — exactly when GE capital plus operating help is worth most. Observables: hiring titles/JDs misaligned with what the stage requires, revenue outrunning org sophistication, founder still personally closing at scale, first-ever VP req, abrupt product/geo expansion. It is directionally ambiguous by construction, and validating the firm-side "what they *should* be hiring for" model needs a contrast class or it's self-confirmation — that contrast class is Q10.
+- **Instrumentation.** The project's schema is locked as three normalized tables (Primary_Sources, Gate_Evaluations, Agent_Executions); whether telemetry is flat or split is the standing [OPEN] behind Q9, current lean: split.
+- **Survivorship bias.** Portfolio-derived signals are not clean gate sources — anything learned from the Q4 matrix is descriptive input for lens design and backtesting, never a validated gate.
+
+**Principles (non-negotiable):**
 
 1. **Log every dead end.** The false-negative principle applied to research: a query or URL silently abandoned is invisible and unrecoverable. Every abandoned path gets a logged reason.
 2. **Snapshot everything cited — raw.** Sources mutate and vanish, and WebFetch digests are not sources (§0.5). A claim without a stored raw snapshot is not a claim (model-mediated snapshots are a labeled, low-confidence exception, §7).
 3. **Cited ≠ true.** Synthesis agents verify each claim against the snapshot before it enters `findings.md`. Unverifiable claims are downgraded to `[UNVERIFIED]` and moved to the uncertainty register, never silently dropped or silently kept.
 4. **Discovery and interpretation are decoupled.** Researchers collect; synthesizers reason over the frozen corpus and **never touch the live web** — enforced structurally: synthesizers get no web tools and no Bash (§10).
 5. **Never speculatively resolve** a question that requires firm data or a design decision. Mark it, state the required input, move on.
-6. **Budget is a proxy.** The handoff doc's own words: context degradation is signal-to-noise, not token count. The 32k cap is enforced, but a clean 15k read beats a noisy 30k — researchers prune aggressively and stop reading pages that aren't paying.
+6. **Budget is a proxy.** The project's own framing: context degradation is signal-to-noise, not token count. The 32k cap is enforced, but a clean 15k read beats a noisy 30k — researchers prune aggressively and stop reading pages that aren't paying.
 7. **Aggregators are leads, not evidence.** Tracxn/blog/roundup pages may point somewhere; only primaries (the firm's own site, G2 product pages, EDGAR filings, archive.org captures, official docs/pricing pages) are citable.
 
 ---
 
 ## 3. Question backlog → write this to `backlog.yaml`
+
+**Mapping: the project's six standing `[OPEN]` items → backlog questions.** This table is the skeleton of the `findings.md` delta table (§12); Q1–Q7 are additional questions from the follow-on working session.
+
+| Standing `[OPEN]` item | Mapped Q |
+|---|---|
+| Historical lead data from the firm (gates all backtest claims in the pitch) | Q11 |
+| Optimal stopping between breadth and depth passes | Q8 |
+| Feedback mechanics from reasoning back to discovery | Q12 |
+| Promotion thresholds (Tier 3 → Tier 2) | Q13 |
+| Contrast class for the inflection-strain lens | Q10 |
+| Flat vs. split telemetry tables | Q9 |
 
 ```yaml
 # class A = web-researchable | class B = requires firm input or is a design decision
@@ -91,7 +114,14 @@ questions:
       value in first-party data from it? Classify yes/no/ambiguous with product-
       page evidence per company. Quick comparison pass on adjacent categories
       (Industrial IoT, IoT Device Management). Output: match fraction + lists.
-      This tests whether "IoT Platforms" is a usable enumeration proxy.
+      WHY THIS MATTERS: G2/Capterra category grids are enumeration channel #3
+      in the project's set-construction strategy (review accumulation
+      approximates paying customers; the category approximates the vertical's
+      population), and the locked next step builds its bounded set from one G2
+      category intersected with one trade-show exhibitor list. This question
+      tests whether "IoT Platforms" is a usable enumeration proxy for the
+      hardware-enabled-software thesis — a negative answer is itself a P0
+      finding.
       ACCESS WARNING: G2 sits behind aggressive bot protection; live fetches
       will often 403. Follow the §15 fallback ladder (live -> Wayback capture
       of the same page -> unknown + dead_end). If G2 is hard-blocked at the
@@ -116,8 +146,11 @@ questions:
       returns the capture CLOSEST to a timestamp, which can postdate the
       investment even when earlier captures exist.)
       CRITICAL EPISTEMICS: absence of a Wayback capture is NOT evidence the
-      page didn't exist — record 'unknown', never 'no'. Output rows for
-      matrix/portfolio_venue_matrix.csv (schema in §7).
+      page didn't exist — record 'unknown', never 'no'. And the matrix itself
+      is portfolio-derived, so it carries survivorship bias by construction:
+      it is descriptive input for lens design and backtesting, never evidence
+      for a gate. Output rows for matrix/portfolio_venue_matrix.csv (schema
+      in §7).
     note: Large. Orchestrator pre-splits into batches of <=5 companies from census.csv.
 
   - id: Q5
@@ -140,11 +173,19 @@ questions:
     priority: P1
     title: Entity-resolution tooling verification
     brief: >
-      Verify against official docs: Splink (input schema expectations, blocking
-      rules, backends), RapidFuzz, company-name normalization libraries (e.g.
-      cleanco), dedupe alternatives. Deliver: what each actually requires as
-      input, with doc links — enough to confirm/refute the "founder-anchored
-      candidate set -> Splink on the narrow set" plan.
+      Verify against official docs: Splink — including the project's specific
+      claims about it, which are HYPOTHESES to check (UK Ministry of Justice
+      origin, Fellegi-Sunter model, DuckDB backend), plus input schema
+      expectations, blocking rules, other backends. Also RapidFuzz,
+      company-name normalization libraries (e.g. cleanco), dedupe
+      alternatives. Deliver: what each actually requires as input, with doc
+      links — enough to confirm/refute the "founder-anchored candidate set ->
+      Splink on the narrow set" plan. Context: the project splits entity
+      resolution into two problems — canonicalization at scale (commoditized;
+      don't build; Splink stays in pocket iff the multi-channel merge in set
+      construction actually hurts) and attribution of a found source to a
+      company_id (a confidence field set during triage, not an infrastructure
+      layer). Tier 1/2 evaluation has no resolution step at all.
 
   - id: Q7
     class: A
@@ -161,25 +202,41 @@ questions:
     priority: P2
     title: Optimal stopping between breadth and depth passes — decision inputs
     brief: >
-      Short literature scan: secretary problem, multi-armed bandits for pipeline
-      stopping, IR "when to stop searching" results. Deliver 3-5 candidate
-      stopping rules WITH citations. Do NOT pick one — this maps to a design
-      [OPEN] and stays open.
+      Context: the project's funnel is multiple T's — cheap breadth gates kill
+      most of the bounded set, survivors get deep exploration, and empty depth
+      results feed back to widen N or re-run breadth; when to stop alternating
+      is the standing [OPEN]. Short literature scan: secretary problem,
+      multi-armed bandits for pipeline stopping, IR "when to stop searching"
+      results. Deliver 3-5 candidate stopping rules WITH citations. Do NOT
+      pick one — this maps to a design [OPEN] and stays open.
 
   - id: Q9
     class: A-input
     priority: P3
     title: Flat vs split telemetry tables — practice inputs
     brief: >
-      Brief scan of event-logging schema practice (wide events vs normalized,
-      OpenTelemetry event modeling). Inputs only; the [OPEN] stays open.
+      Context: the project's instrumentation schema is locked as three
+      normalized tables (Primary_Sources, Gate_Evaluations, Agent_Executions);
+      the standing [OPEN] is whether telemetry is flat or split, with a stated
+      lean toward split. Brief scan of event-logging schema practice (wide
+      events vs normalized, OpenTelemetry event modeling). Inputs only; the
+      [OPEN] stays open — report whether practice supports or undercuts the
+      "leaning split" prior, without resolving it.
 
   - id: Q10
     class: A
     priority: P2
     title: Contrast class feasibility for the inflection-strain lens
     brief: >
-      Can a comparable "not-invested" set be constructed from public data (e.g.
+      Context — the inflection-strain lens (a Tier 2 signal, never a gate):
+      detect companies at the moment their current org can't take them to the
+      next level, exactly when GE capital plus operating help is worth most.
+      Observables: hiring titles/JDs misaligned with what the stage requires,
+      revenue outrunning org sophistication, founder still personally closing
+      at scale, first-ever VP req, abrupt product/geo expansion. Validating
+      the firm-side "what they SHOULD be hiring for" model needs a contrast
+      class, or the lens is self-confirmation — that contrast class is this
+      question. Can a comparable "not-invested" set be constructed from public data (e.g.
       same G2 category + similar founding era)? EDGAR Form D absence may be
       used only as ONE WEAK NEGATIVE SIGNAL requiring corroboration — many
       rounds never produce a Form D (4(a)(2) placements, late/never filers,
@@ -195,19 +252,35 @@ questions:
     resolution: NOT-RESEARCHABLE
     brief: >
       Requires Volition sharing historical lead/decision data. findings.md must
-      state this plainly: gates all backtest claims in the pitch until obtained.
+      state this plainly: gates all backtest claims in the pitch until
+      obtained. The same data also gates the project's two cheap pre-build
+      tests: the null hypothesis (do three reliable endpoints plus a rubric
+      reproduce the firm's decisions?) and the veto-dependency check (for
+      companies the firm already decided on, did the decision hinge on
+      demo/founder-intuition material beyond known endpoints?). Neither can
+      run without it.
 
   - id: Q12
     class: B
     priority: P2
     title: Feedback mechanics from reasoning back to discovery
     resolution: NOT-RESEARCHABLE (design decision; may cite Q8 inputs)
+    brief: >
+      The standing [OPEN]: what "we didn't answer Q2" concretely triggers —
+      how a failed or empty reasoning pass feeds back to widen N or re-run
+      breadth discovery. Design decision; the findings section states the
+      required decision and may cite Q8's stopping-rule inputs.
 
   - id: Q13
     class: B
     priority: P2
     title: Tier 3 -> Tier 2 promotion thresholds
     resolution: NOT-RESEARCHABLE (design decision)
+    brief: >
+      The standing [OPEN]: how many human-verified signal-bearing hits promote
+      a Tier 3 exploratory endpoint to a Tier 2 known endpoint — and the
+      companion retirement rule for gates that stop predicting. Design
+      decision; the findings section states the required input.
 ```
 
 ---
@@ -216,7 +289,7 @@ questions:
 
 ```
 orchestrator (you, main session)
- ├─ reads handoff doc + backlog; owns waves, budgets, splits, assembly
+ ├─ reads this spec + backlog; owns waves, budgets, splits, assembly
  ├─ researcher subagents  (parallel, <=4 per wave, model claude-fable-5)
  │    web -> raw snapshots/ + evidence/<qid>.json + telemetry events
  ├─ synthesizer subagents (parallel, offline — corpus only; no web, no Bash)
@@ -553,8 +626,8 @@ Read only `sections/*.md`, telemetry aggregates, and `matrix/census.csv`. Struct
 # Findings — GE Sourcing Open Questions
 Run: <date> · model configured: <from orchestrator spawn logs> (subagent self-reports labeled as such) · agents spawned: N · total est. read tokens: T · max single-agent: M
 
-## Open-question delta (the six original [OPEN] items)
-| Original [OPEN] item | Mapped Q | New status | One-line outcome |
+## Open-question delta (the six standing [OPEN] items, rows per the §3 mapping table)
+| Standing [OPEN] item | Mapped Q | New status | One-line outcome |
 
 ## Executive summary
 <=1 page, from section statuses only.
@@ -646,7 +719,7 @@ board()
 
 ## 14. Runbook (orchestrator)
 
-1. **Phase 0 (first session, cwd = repo root):** read handoff doc → build full scaffold (§8) exactly → verify files (`bash -n` the scripts, `python3 -m py_compile dashboard/app.py`) → tell the user to **restart Claude Code** (same cwd) and run the execute kickoff. Stop.
+1. **Phase 0 (first session, cwd = repo root):** read this spec fully → build full scaffold (§8) exactly → verify files (`bash -n` the scripts, `python3 -m py_compile dashboard/app.py`) → tell the user to **restart Claude Code** (same cwd) and run the execute kickoff. Stop.
 2. **Phase 1 (after restart, cwd = repo root):** confirm `researcher` and `synthesizer` are registered (halt + tell user if not). Log orchestrator `spawn`.
 3. **Wave 1 (≤4 parallel):** Q1, Q2, Q6, Q7.
 4. Between every wave: read telemetry; confirm no agent's self-reported reads >32k; audit dead-end counts vs replies (spot-check any zero-dead-end agent with >5 fetches); note any venue-level `bot-blocked` dead ends and mark those venues **fail-fast** in subsequent briefs (later batches go straight to Wayback); execute any `split_proposal`s; spawn a synthesizer for each qid whose evidence has fully landed (synthesizers can run alongside later research waves).
@@ -673,7 +746,7 @@ board()
 ## 16. Kickoff prompts
 
 **Phase 0 (scaffold):**
-> Read SPEC.md (this file) and ge-sourcing-handoff.md. Execute §8 Phase 0 only: build the full scaffold at the repo root, including both agent files under .claude/agents/, .claude/settings.json, backlog.yaml, scripts, and dashboard. Verify the scripts and dashboard parse. Then stop and tell me to restart the session from the repo root.
+> Read SPEC.md (this file) fully — it is self-contained. Execute §8 Phase 0 only: build the full scaffold at the repo root, including both agent files under .claude/agents/, .claude/settings.json, backlog.yaml, scripts, and dashboard. Verify the scripts and dashboard parse. Then stop and tell me to restart the session from the repo root.
 
 **Phase 1 (execute):**
-> Read SPEC.md and ge-sourcing-handoff.md. You are the orchestrator. Execute the §14 runbook from step 2. Do not fetch web content yourself — delegate all research to researcher subagents in parallel waves of ≤4, enforce the §5 caps via telemetry between waves, run synthesizers offline as evidence lands, and finish only when the §1 DoD checklist fully passes.
+> Read SPEC.md fully — it is self-contained. You are the orchestrator. Execute the §14 runbook from step 2. Do not fetch web content yourself — delegate all research to researcher subagents in parallel waves of ≤4, enforce the §5 caps via telemetry between waves, run synthesizers offline as evidence lands, and finish only when the §1 DoD checklist fully passes.
