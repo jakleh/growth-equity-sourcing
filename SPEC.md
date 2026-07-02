@@ -1,6 +1,6 @@
 # SPEC — Fable 5 Research Fleet: Open-Question Resolution Run
 
-*Rev. 4 (2026-07-02) — Rev. 2: adversarial review pass. Rev. 3: folded in the project handoff (self-contained). Rev. 4: fixes the six high-severity defects from the recursive critique run (see CRITIQUE.md). See commit messages for change logs.*
+*Rev. 5 (2026-07-02) — Rev. 2: adversarial review pass. Rev. 3: folded in the project handoff (self-contained). Rev. 4: fixed the six high-severity defects from the recursive critique run (see CRITIQUE.md). Rev. 5: fixed all sixteen medium-severity findings. See commit messages for change logs.*
 
 **Feed this file to Claude Code.** You (the main Claude Code session) are the **orchestrator**. You will scaffold the repo, deploy a fleet of parallel `claude-fable-5` researcher subagents, enforce per-agent fetch-volume caps, and assemble a single `findings.md` in which every claim cites an exact primary-source URL backed by a raw snapshot — and every unresolved question is explicitly marked as such.
 
@@ -27,11 +27,11 @@
 **Definition of Done — do not stop before all boxes check:**
 
 - [ ] `findings.md` exists; **every factual claim** carries a footnote with exact URL + access timestamp + local snapshot path.
-- [ ] Every cited snapshot is **raw** (`fidelity: raw` in its meta.json) unless explicitly labeled `model-mediated`, in which case the claim's confidence is capped at `low` and it appears in the uncertainty register.
+- [ ] Every cited snapshot is **raw** unless explicitly labeled `model-mediated`, in which case the claim's confidence is capped at `low` and it appears in the uncertainty register. Enforcement point: the synthesizer, which reads each snapshot's meta.json `fidelity` and reports it per footnote (§10 step 5) — you check the sections' footnotes, not the snapshots themselves (§4).
 - [ ] Every backlog question (§3) has a status: `RESOLVED` / `PARTIAL` / `UNRESOLVED` / `NOT-RESEARCHABLE`.
 - [ ] The six standing `[OPEN]` items each appear in a delta table mapping old status → new status, per the §3 mapping table.
 - [ ] `NOT-RESEARCHABLE` questions state *exactly what input would resolve them* (firm data, design decision, etc.) — with **zero speculation** offered as resolution.
-- [ ] `matrix/portfolio_venue_matrix.csv` is populated, with gaps marked `unknown` + reason, never guessed.
+- [ ] `matrix/portfolio_venue_matrix.csv` is populated — **one row per (census company × venue checked)**, every column carrying a value or `unknown` (+ reason in notes), never guessed. Headers-plus-a-few-rows does not pass this box.
 - [ ] Telemetry shows no agent's **self-reported** cumulative read estimate exceeded 32,000 tokens — **or** every breach is documented in the `findings.md` method note (agent, question, overrun amount, cause, and the remediation taken: split executed, re-run, or none-possible). (Estimates are self-logged proxies — see §5 — so this is attestation-grade, and `findings.md` says so.)
 - [ ] Dead-end accounting is **auditable**: each researcher's reported `#dead_ends` matches its telemetry events, and any agent reporting zero dead ends across >5 fetches was spot-checked by the orchestrator (note the check in `findings.md`) — discrepancies that can't be repaired are documented, not hidden. Fabricating a dead end to satisfy tooling is itself a protocol violation — an honest zero beats an invented entry.
 - [ ] `streamlit run dashboard/app.py` works.
@@ -59,7 +59,7 @@
 3. **Cited ≠ true.** Synthesis agents verify each claim against the snapshot before it enters `findings.md`. Unverifiable claims are downgraded to `[UNVERIFIED]` and moved to the uncertainty register, never silently dropped or silently kept.
 4. **Discovery and interpretation are decoupled.** Researchers collect; synthesizers reason over the frozen corpus and **never touch the live web** — enforced structurally: synthesizers get no web tools and no Bash (§10).
 5. **Never speculatively resolve** a question that requires firm data or a design decision. Mark it, state the required input, move on.
-6. **Budget is a proxy.** The project's own framing: context degradation is signal-to-noise, not token count. The 32k cap is enforced, but a clean 15k read beats a noisy 30k — researchers prune aggressively and stop reading pages that aren't paying.
+6. **Budget is a proxy.** The project's own framing: context degradation is signal-to-noise, not token count. The 32k cap is audited between waves from self-logged telemetry (attestation-grade — §5), and a clean 15k read beats a noisy 30k — researchers prune aggressively and stop reading pages that aren't paying.
 7. **Aggregators are leads, not evidence.** Tracxn/blog/roundup pages may point somewhere; only primaries (the firm's own site, G2 product pages, EDGAR filings, archive.org captures, official docs/pricing pages) are citable.
 
 ---
@@ -115,7 +115,11 @@ questions:
       For each: does the vendor deploy its OWN hardware and anchor the software
       value in first-party data from it? Classify yes/no/ambiguous with product-
       page evidence per company. Quick comparison pass on adjacent categories
-      (Industrial IoT, IoT Device Management). Output: match fraction + lists.
+      (Industrial IoT, IoT Device Management). Output: BOTH match fractions,
+      defined as strict = yes/n and lenient = (yes+ambiguous)/n where n = all
+      products sampled, plus the three classified lists. Do NOT invent a
+      usability threshold — report the numbers; the go/no-go on the proxy is
+      a synthesis-level and human judgment, not a researcher convention.
       WHY THIS MATTERS: G2/Capterra category grids are enumeration channel #3
       in the project's set-construction strategy (review accumulation
       approximates paying customers; the category approximates the vertical's
@@ -142,11 +146,18 @@ questions:
       fallback ladder and respect venue-level fail-fast flags in your brief.
       For each hit, run the PREDATES check via the Wayback CDX API:
         curl 'http://web.archive.org/cdx/search/cdx?url={URL}&to={YYYYMMDD of investment}&limit=1'
-      A returned capture with timestamp STRICTLY EARLIER than the investment
-      date => predates=yes (record the capture timestamp + wayback URL).
-      Empty result => predates=unknown. (Do NOT use the availability API — it
-      returns the capture CLOSEST to a timestamp, which can postdate the
-      investment even when earlier captures exist.)
+      Save the raw response to snapshots/<qid>/<slug>.cdx.txt (+ meta.json,
+      fidelity raw, url = the full CDX query) and log a snapshot event — the
+      .cdx.txt is the evidence for the timestamp fact; the wayback_url only
+      evidences page content. Verdict rule (compare the capture timestamp's
+      first 8 digits to the investment date): earlier => predates=yes (record
+      timestamp + wayback URL); same day as the investment, or empty result
+      => predates=unknown. predates=no is NEVER inferred from capture absence
+      — assert it only from positive evidence of non-existence (e.g. the
+      venue or the profile verifiably launched after the investment date).
+      (Do NOT use the availability API — it returns the capture CLOSEST to a
+      timestamp, which can postdate the investment even when earlier captures
+      exist.)
       CRITICAL EPISTEMICS: absence of a Wayback capture is NOT evidence the
       page didn't exist — record 'unknown', never 'no'. And the matrix itself
       is portfolio-derived, so it carries survivorship bias by construction:
@@ -314,11 +325,12 @@ orchestrator (you, main session)
 - **Self-warning at 20,000.**
 - Task briefs are ≤ ~1,500 tokens. Replies to the orchestrator are ≤10 lines. **Evidence/CSV files are uncapped and do not count against the writer's read cap** — writing is generation, not reading. (They do count against the *synthesizer's* cap when it reads them.)
 - **Accounting:** `est_tokens = ceil(chars / 4)` on every fetched/read body, self-logged (§6). For WebFetch/WebSearch this is an honest eyeball estimate of the tool result the agent saw — true per-subagent token counts aren't exposed in-session. The estimate is the tracked metric; the dashboard and `findings.md` both say so. Raw snapshot files fetched via `curl` do **not** count (they land on disk, not in context) — but any part of a snapshot later Read into context does.
-- **Enforcement is post-hoc:** the orchestrator audits telemetry between waves (§14). An agent can overrun mid-wave with nothing stopping it except its own instructions — a stated limitation of this design, mitigated by the 24k soft stop.
+- **Enforcement is post-hoc:** the orchestrator audits telemetry between waves (§14). The audited number is each agent's **summed `read`-event est_tokens** (the dashboard's metric); `done.cum_tokens` is the agent's own running total and is used only to flag divergence, never as the enforcement figure. A discovered breach triggers the §1 breach procedure (document it; prefer splits for that question's successors). An agent can still overrun mid-wave with nothing stopping it except its own instructions — a stated limitation of this design, mitigated by the 24k soft stop.
+- **Path convention:** qids are lowercase in every file and directory name (`evidence/q4a.json`, `snapshots/q4a/`, `matrix/q4a.csv`, `sections/q4a.md`); uppercase forms (`Q4a`) appear only in prose, briefs, and telemetry `question_id` fields. Case drift breaks the globs below.
 - **Split protocol (orchestrator-executed — researchers cannot spawn agents):**
   1. Researcher nearing budget with the question unfinished returns `status: partial` + `split_proposal`: 2–4 *disjoint* child briefs.
   2. You spawn children as `Q4a`, `Q4b`, … each with a fresh budget and only the narrowed brief (never the parent's raw reads).
-  3. Parent evidence is preserved; the synthesizer for the base qid reads all its `evidence/` files. Splitting researchers concentrates load on that one synthesizer, so for heavily split questions the orchestrator runs one synthesizer per child evidence file plus a final merge synthesizer that reads only the child `sections/` files — the synthesizer-side mirror of the researcher split protocol.
+  3. Parent evidence is preserved; the synthesizer for the base qid reads all its `evidence/` files. Splitting researchers concentrates load on that one synthesizer, so for heavily split questions the orchestrator runs one synthesizer per child evidence file plus a final merge synthesizer — the synthesizer-side mirror of the researcher split protocol. **Synthesis ownership:** split children never get independent findings sections; per-child synthesizers write intermediates (`sections/<base>-part<n>.md`) and the merge synthesizer writes the single `sections/<base>.md` that assembly consumes. Only the orchestrator assigns synthesizers — a child qid is never synthesized twice.
   4. Splitting is always preferred over budget overrun. Pre-split anything obviously large (Q4 → company batches of ≤5) before first spawn.
 
 ---
@@ -337,7 +349,7 @@ One JSON object per line:
 ```
 
 - `event` ∈ `spawn | read | snapshot | dead_end | split_proposed | done` (orchestrator logs its own `spawn`/`done` with `role:"orchestrator"`; its `spawn` events for subagents carry `model_configured`).
-- `dead_end` events carry `{"url_or_query":..., "reason":...}`.
+- `dead_end` events carry `{"url_or_query":..., "reason":...}`. `reason` MUST begin with one controlled token — `bot-blocked | paywalled | not-found | timeout | irrelevant | exhausted-budget | other` — optionally followed by `: free text` (e.g. `"bot-blocked: 403 via DataDome"`). §14's venue fail-fast filter matches on the leading token; an uncontrolled reason string is invisible to it.
 - `done` carries `{"status":..., "cum_tokens":..., "model_self_reported":...}` — self-reported, unverifiable in-session (§0.2).
 - `snapshot` events carry `{"url":..., "http_status":..., "bytes":...}` — **no `est_tokens`**; snapshot bytes are disk artifacts, not budget (§5), and only `read` events feed budget math.
 
@@ -379,7 +391,7 @@ and logs a `snapshot` event.
 
 **Quote verification (researcher-side, before recording a claim):** `grep -qiF "<quote>" snapshots/<qid>/<slug>.txt` must succeed. If it doesn't, re-derive the quote *from the .txt* — never from the WebFetch digest. Record the result in the claim's `quote_verified` field (§11).
 
-**Model-mediated fallback.** If the raw fetch fails (non-200, bot challenge), you may — as a last resort after the §15 fallback ladder — snapshot the WebFetch digest via Write with `"fidelity":"model-mediated"` in its meta.json. Such claims are capped at `confidence: low`, flagged in the section, and routed to the uncertainty register. Log the failed raw fetch as a `dead_end`.
+**Model-mediated fallback (ladder rung (c), §15).** If both the live raw fetch and the Wayback rung fail, you may snapshot the WebFetch digest: Write it to `snapshots/<qid>/<slug>.txt` (there is no raw body, so no `.html`) plus `snapshots/<qid>/<slug>.meta.json` with `"fidelity":"model-mediated"`. Claims citing it point their `snapshot` field at that `.txt` — giving the synthesizer a file to verify against — and are capped at `confidence: low`, flagged in the section, and routed to the uncertainty register. Log the failed raw fetch as a `dead_end`.
 
 Reads that end up uncited may skip the snapshot but never skip the `read` log.
 
@@ -395,10 +407,11 @@ Never a bare domain, never a URL that wasn't actually fetched, never an invented
 **Predates check (Q4):** use the CDX API, not the availability API:
 
 ```
-curl 'http://web.archive.org/cdx/search/cdx?url={URL}&to={YYYYMMDD of investment}&limit=1'
+curl 'http://web.archive.org/cdx/search/cdx?url={URL}&to={YYYYMMDD of investment}&limit=1' \
+  > snapshots/<qid>/<slug>.cdx.txt
 ```
 
-Non-empty result with capture timestamp **strictly earlier** than the investment date → `predates=yes` (record timestamp + wayback URL). Empty → `unknown`. (The availability API returns the capture *closest* to a timestamp — possibly later — and cannot distinguish "no earlier capture" from "a later one is closer"; it systematically manufactures false negatives on exactly the field this matrix exists to compute.)
+Save the raw response as shown (+ meta.json with `fidelity: raw` and the full CDX query as `url`; log a `snapshot` event) — the `.cdx.txt` is the citable evidence for the timestamp fact; the `wayback_url` column only evidences page content. Verdict rule, comparing the capture timestamp's first 8 digits against the investment date: **earlier** → `predates=yes` (record timestamp + wayback URL); **same day, or empty result** → `unknown`. `predates=no` is never inferred from capture absence — assert it only from positive evidence of non-existence (e.g. the venue or profile verifiably launched after the investment date). (The availability API returns the capture *closest* to a timestamp — possibly later — and cannot distinguish "no earlier capture" from "a later one is closer"; it systematically manufactures false negatives on exactly the field this matrix exists to compute.)
 
 **`matrix/portfolio_venue_matrix.csv` columns:**
 `company, investment_date, investment_date_source_url, venue, present(y/n/unknown), venue_label_or_category, earliest_evidence_date, evidence_url, wayback_url, predates_investment(y/n/unknown), notes`
@@ -529,22 +542,26 @@ HARD RULES
    grep -qiF "<quote>" snapshots/<qid>/<slug>.txt must succeed. If it fails,
    re-derive the quote FROM THE .txt, never from the WebFetch digest. Record
    quote_verified accordingly.
-4. FALLBACK LADDER for blocked pages (G2/Crunchbase/Inc.com etc. bot-block):
-   (a) live raw fetch via snap.sh; (b) Wayback capture of the same URL
-   (fetch https://web.archive.org/web/<timestamp>/<url>, snapshot THAT —
-   it is a citable primary); (c) record `unknown` + dead_end. Last resort
-   only: snapshot the WebFetch digest via Write with "fidelity":
-   "model-mediated" in meta.json — such claims are capped at confidence low.
-   If your brief flags a venue as hard-blocked (fail-fast), skip (a) and go
-   straight to Wayback.
+4. FALLBACK LADDER for blocked pages (G2/Crunchbase/Inc.com etc. bot-block),
+   strictly in this order: (a) live raw fetch via snap.sh; (b) Wayback
+   capture of the same URL (fetch
+   https://web.archive.org/web/<timestamp>/<url>, snapshot THAT — it is a
+   citable primary); (c) if the content still matters at low confidence,
+   the WebFetch digest, written to snapshots/<qid>/<slug>.txt + meta.json
+   with "fidelity":"model-mediated" — claims citing it are capped at
+   confidence low; (d) record `unknown`. Whenever you abandon the URL — at
+   any rung — log a dead_end. If your brief flags a venue as hard-blocked
+   (fail-fast), skip (a).
 5. PRIMARIES ONLY as evidence: the firm's own site, G2 product/category
    pages, EDGAR filings, archive.org captures, official docs/pricing pages,
    Inc.com profile pages. Aggregators and blogs are leads; corroborate
    before citing, or mark the claim low-confidence.
 6. DEAD ENDS: every abandoned query/URL gets a `dead_end` telemetry event
-   with a reason (e.g. "bot-blocked-403", "paywalled", "irrelevant").
-   Silent abandonment is the one unrecoverable mistake. Never fabricate a
-   dead end — an honest zero is a valid answer.
+   whose reason BEGINS with one of: bot-blocked | paywalled | not-found |
+   timeout | irrelevant | exhausted-budget | other (free text after a
+   colon, e.g. "bot-blocked: 403"). The orchestrator's fail-fast filter
+   matches the leading token. Silent abandonment is the one unrecoverable
+   mistake. Never fabricate a dead end — an honest zero is a valid answer.
 7. EPISTEMICS: paraphrase; record a short exact quote (<=25 words) + locator
    per claim so the verifier can check entailment against the raw .txt.
    Absence of evidence (e.g., no Wayback capture, paywalled page) is
@@ -665,7 +682,7 @@ PROCESS
 }
 ```
 
-This file is uncapped (§5) — completeness beats brevity here; the synthesizer, not the orchestrator, reads it. For matrix questions (Q4 batches), `data.matrix_rows` duplicates the rows written to `matrix/<lowercase-qid>.csv` — it is the verification copy per §7.
+This file is uncapped (§5) — completeness beats brevity here; the synthesizer, not the orchestrator, reads it. For matrix questions (Q4 batches), `data.matrix_rows` duplicates the rows written to `matrix/<lowercase-qid>.csv` — it is the verification copy per §7. The `snapshot` field points at the `.html` for raw snapshots and at the `.txt` for model-mediated ones (§7). Status casing is fixed two-form: evidence JSON uses lowercase snake (`not_researchable`, `partial`); section headers and findings.md use the display form (`NOT-RESEARCHABLE`, `PARTIAL`) — a 1:1 mapping, no third variant anywhere.
 
 ---
 
@@ -732,6 +749,11 @@ def board():
     if not rows:
         st.info("no telemetry yet"); return
     df = pd.DataFrame(rows)
+    # spawn-only telemetry (start of run) lacks these keys entirely — guarantee the
+    # columns exist or the .est_tokens / .question_id accesses below raise
+    for col in ("event", "question_id", "ts", "est_tokens", "cum_tokens"):
+        if col not in df.columns:
+            df[col] = None
     # budget = `read` events only; `snapshot` events are disk artifacts, not context
     reads = df[df.event == "read"].groupby("agent_id").est_tokens.sum().rename("read_tokens")
     meta  = df.groupby("agent_id").agg(qid=("question_id", "first"), last_seen=("ts", "max"))
@@ -773,8 +795,8 @@ board()
 1. **Phase 0 (first session, cwd = repo root):** read this spec fully → build full scaffold (§8) exactly → verify files (`bash -n` the scripts, `python3 -m py_compile dashboard/app.py`) → tell the user to **restart Claude Code** (same cwd) and run the execute kickoff. Stop.
 2. **Phase 1 (after restart, cwd = repo root):** confirm `researcher` and `synthesizer` are registered (halt + tell user if not). Log orchestrator `spawn`.
 3. **Wave 1 (≤4 parallel):** Q1, Q2, Q6, Q7.
-4. Between every wave: read telemetry; confirm no agent's self-reported reads >32k; audit dead-end counts vs replies (spot-check any zero-dead-end agent with >5 fetches); note any venue-level `bot-blocked` dead ends and mark those venues **fail-fast** in subsequent briefs (later batches go straight to Wayback); execute any `split_proposal`s (and the synthesizer-side split of §5.3 where a synthesizer reported capacity limits); spawn a synthesizer for each qid whose evidence has fully landed (synthesizers can run alongside later research waves).
-5. **Wave 2:** Q3, Q5 + first Q4 batches — **gated on `matrix/census.csv` existing** (Q1's deliverable; if the census is partial, batch only the companies that landed and schedule the rest for Wave 3). Cut batches of ≤5 companies from the CSV; put each batch's companies + investment dates directly in the child brief.
+4. Between every wave: read telemetry; confirm no agent's summed `read` est_tokens >32k (the §5 enforcement metric — breaches follow the §1 breach procedure); audit dead-end counts vs replies (spot-check any zero-dead-end agent with >5 fetches); note any venue-level `bot-blocked` dead ends and mark those venues **fail-fast** in subsequent briefs (later batches skip the live rung); re-diff `matrix/census.csv` against already-dispatched Q4 batches — companies added since form catch-up batches in the next wave, so late census rows never silently miss the matrix; execute any `split_proposal`s (and the synthesizer-side split of §5.3 where a synthesizer reported capacity limits); spawn a synthesizer for each qid whose evidence has **fully landed** — defined as: every researcher spawned for that qid (parent, children, batches) has logged `done`, and no split proposal or catch-up batch for it remains undispatched (synthesizers can run alongside later research waves).
+5. **Wave 2:** Q3, Q5 + first Q4 batches — **gated on `matrix/census.csv` existing** (Q1's deliverable; if the census is partial, batch only the companies that landed and schedule the rest for Wave 3). Cut batches of ≤5 companies from the CSV; put each batch's companies + investment dates directly in the child brief. **If Q1 lands UNRESOLVED** (no census obtainable even after splits), do not stall: write Q4's section as UNRESOLVED / blocked-on-input (required input: the portfolio census), drop the Q4 batches from later waves, and move on.
 6. **Wave 3:** remaining Q4 batches, Q8, Q10.
 7. **Wave 4:** Q9 + any split children/stragglers.
 8. B-class (Q11–Q13): no researchers. Write their sections yourself: status NOT-RESEARCHABLE + required input, per §2.5.
@@ -785,7 +807,7 @@ board()
 ## 15. Guardrails
 
 - Public pages only; no login, no paywall circumvention, no scraping tricks (a plain `curl` of a public URL, at polite rates, is fine; defeating bot challenges is not). Paywall → logged dead end + free-primary substitute or an honest gap.
-- **Blocked-venue fallback ladder** (G2, Crunchbase, Inc.com and friends bot-block aggressively): live raw fetch → Wayback capture of the same page → `unknown` + dead_end. First hard 403 on a venue gets logged as a venue-level dead end; the orchestrator flags that venue fail-fast for later batches. WebFetch-digest snapshots are a last resort, labeled `model-mediated`, confidence-capped at low.
+- **Blocked-venue fallback ladder** (G2, Crunchbase, Inc.com and friends bot-block aggressively), one ordering everywhere (§9 rule 4 states the same): (a) live raw fetch → (b) Wayback capture of the same page → (c) WebFetch digest, labeled `model-mediated`, confidence capped at low → (d) `unknown` + dead_end. First hard 403 on a venue gets logged as a venue-level dead end with reason token `bot-blocked`; the orchestrator flags that venue fail-fast for later batches (they skip rung (a)).
 - Space out fetches to the same host; be a polite client.
 - Prefer archive.org captures for anything historical or date-sensitive — they are stable and citable primaries, and they double as the predates evidence.
 - Predates checks use the **CDX API** (§7), never the availability API.
