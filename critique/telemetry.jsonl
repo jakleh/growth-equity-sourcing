@@ -1,0 +1,20 @@
+{"ts": "2026-07-02T20:58:58Z", "event": "spawn", "node_id": "ROOT", "level": 0, "chunk_tokens_est": null, "output_tokens_est": null, "wall_secs": null, "notes": "orchestrator start; SPEC_PATH=./SPEC.md (config filename adjusted per run doc)"}
+{"ts": "2026-07-02T21:00:04Z", "event": "spawn", "node_id": "L1-C1", "level": 1, "chunk_tokens_est": 2538, "output_tokens_est": null, "wall_secs": null, "notes": "chunk written (planned leaf)"}
+{"ts": "2026-07-02T21:00:04Z", "event": "spawn", "node_id": "L1-C2", "level": 1, "chunk_tokens_est": 2896, "output_tokens_est": null, "wall_secs": null, "notes": "chunk written (planned leaf)"}
+{"ts": "2026-07-02T21:00:04Z", "event": "spawn", "node_id": "L1-C3", "level": 1, "chunk_tokens_est": 2027, "output_tokens_est": null, "wall_secs": null, "notes": "chunk written (planned leaf)"}
+{"ts": "2026-07-02T21:00:04Z", "event": "spawn", "node_id": "L1-C4", "level": 1, "chunk_tokens_est": 2436, "output_tokens_est": null, "wall_secs": null, "notes": "chunk written (planned leaf)"}
+{"ts": "2026-07-02T21:00:04Z", "event": "spawn", "node_id": "L1-C5", "level": 1, "chunk_tokens_est": 2010, "output_tokens_est": null, "wall_secs": null, "notes": "chunk written (planned leaf)"}
+{"ts": "2026-07-02T21:00:04Z", "event": "wave_start", "node_id": "WAVE-1", "level": 1, "chunk_tokens_est": null, "output_tokens_est": null, "wall_secs": null, "notes": "leaves L1-C1..L1-C4"}
+{"ts": "2026-07-02T21:03:57Z", "event": "node_done", "node_id": "L1-C1", "level": 1, "chunk_tokens_est": 2538, "output_tokens_est": 1453, "wall_secs": 233, "notes": "wall_secs is per-wave, not per-node"}
+{"ts": "2026-07-02T21:03:57Z", "event": "node_done", "node_id": "L1-C2", "level": 1, "chunk_tokens_est": 2896, "output_tokens_est": 1401, "wall_secs": 233, "notes": "wall_secs is per-wave, not per-node"}
+{"ts": "2026-07-02T21:03:57Z", "event": "node_done", "node_id": "L1-C3", "level": 1, "chunk_tokens_est": 2027, "output_tokens_est": 1302, "wall_secs": 233, "notes": "wall_secs is per-wave, not per-node"}
+{"ts": "2026-07-02T21:03:57Z", "event": "node_done", "node_id": "L1-C4", "level": 1, "chunk_tokens_est": 2436, "output_tokens_est": 1536, "wall_secs": 233, "notes": "wall_secs is per-wave, not per-node"}
+{"ts": "2026-07-02T21:03:57Z", "event": "wave_end", "node_id": "WAVE-1", "level": 1, "chunk_tokens_est": null, "output_tokens_est": null, "wall_secs": 233, "notes": "4 leaves completed"}
+{"ts": "2026-07-02T21:03:57Z", "event": "wave_start", "node_id": "WAVE-2", "level": 1, "chunk_tokens_est": null, "output_tokens_est": null, "wall_secs": null, "notes": "leaf L1-C5"}
+{"ts": "2026-07-02T21:06:08Z", "event": "node_done", "node_id": "L1-C5", "level": 1, "chunk_tokens_est": 2010, "output_tokens_est": 1677, "wall_secs": 131, "notes": "wall_secs is per-wave"}
+{"ts": "2026-07-02T21:06:08Z", "event": "wave_end", "node_id": "WAVE-2", "level": 1, "chunk_tokens_est": null, "output_tokens_est": null, "wall_secs": 131, "notes": "1 leaf completed"}
+{"ts": "2026-07-02T21:06:08Z", "event": "spawn", "node_id": "SEAM", "level": 1, "chunk_tokens_est": 11905, "output_tokens_est": null, "wall_secs": null, "notes": "whole-spec seam agent (spec small enough; at scale this becomes parent-level passes)"}
+{"ts": "2026-07-02T21:08:47Z", "event": "node_done", "node_id": "SEAM", "level": 1, "chunk_tokens_est": 11905, "output_tokens_est": 1403, "wall_secs": 159, "notes": "whole-spec seam pass"}
+{"ts": "2026-07-02T21:08:47Z", "event": "spawn", "node_id": "MERGE", "level": 1, "chunk_tokens_est": null, "output_tokens_est": null, "wall_secs": null, "notes": "merge agent: map + all nodes, may grep SPEC.md for anchors/check-globally"}
+{"ts": "2026-07-02T21:14:53Z", "event": "node_done", "node_id": "MERGE", "level": 1, "chunk_tokens_est": null, "output_tokens_est": 3562, "wall_secs": 366, "notes": "CRITIQUE.md written"}
+{"ts": "2026-07-02T21:16:22Z", "event": "done", "node_id": "ROOT", "level": 0, "chunk_tokens_est": null, "output_tokens_est": null, "wall_secs": null, "notes": "run complete: CRITIQUE.md 35 items (6h/16m/13l); report at critique/run-report.md"}
